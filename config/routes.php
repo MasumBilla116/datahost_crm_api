@@ -142,23 +142,9 @@ return function (App $app) {
     $app->post('/app/customers/dashboard', [CUST_DashboardController::class, 'go']);
 
 
-    //All Booking
-    $app->get('/app/booking', [BookingController::class, 'go']);
-    $app->post('/app/booking', [BookingController::class, 'go']);
-    $app->get('/app/booking/dashboard', [BookingDashboardController::class, 'go']);
-    $app->post('/app/booking/dashboard', [BookingDashboardController::class, 'go']);
-
-
-    //Booking Notes
-    $app->get('/app/booking/notes', [BookingNoteController::class, 'go']);
-    $app->post('/app/booking/notes', [BookingNoteController::class, 'go']);
     //customer payment collections
     $app->get('/app/booking/payment/slip', [PaymentSlipController::class, 'go']);
     $app->post('/app/booking/payment/slip', [PaymentSlipController::class, 'go']);
-    //Room Service
-    $app->get('/app/booking/room-service', [RoomServiceController::class, 'go']);
-    $app->post('/app/booking/room-service', [RoomServiceController::class, 'go']);
-
     //Room Service dashboard
     $app->get('/app/room-service/dashboard', [Roomservice_DashboardController::class, 'go']);
     $app->post('/app/room-service/dashboard', [Roomservice_DashboardController::class, 'go']);
@@ -417,8 +403,8 @@ return function (App $app) {
 
     // attendance  
     $app->get('/app/attendance', [AttendanceController::class, 'go']);
-    $app->post('/app/attendance', [AttendanceController::class, 'go']); 
- 
+    $app->post('/app/attendance', [AttendanceController::class, 'go']);
+
     // Users  
     $app->get('/app/users', [UserController::class, 'go']);
     $app->post('/app/users', [UserController::class, 'go']);

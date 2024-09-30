@@ -66,10 +66,6 @@ class Roomservice_DashboardController
         $this->user = Auth::user($request);
 
         switch ($action) {
-
-            case 'fetchDashboardTopRowData':
-                $this->fetchDashboardTopRowData($request, $response);
-                break;
             case 'FetchAllAssignTask':
                 $this->FetchAllAssignTask($request, $response);
                 break;
@@ -84,27 +80,6 @@ class Roomservice_DashboardController
         }
 
         return $this->customResponse->is200Response($response, $this->responseMessage, $this->outputData);
-    }
-
-
-
-
-
-
-    public function fetchDashboardTopRowData()
-    {
-        $totalRooms = DB::table("room_types")->where("status", 1)->count("id");
-        $housekeepers = DB::table("housekeepers")->where("status", 1)->count("id");
-        $date = date('Y-m-d');
-        $task = DB::table("housekeeping_slip")->where("is_complete", 0)->whereDate('date', $date)->count("id");
-
-        $this->responseMessage = "requested customer fetched Successfully!";
-        $this->outputData = [
-            'totalRooms' => $totalRooms,
-            'totalHousekeepers' => $housekeepers,
-            'ongoingTask' => $task,
-        ];
-        $this->success = true;
     }
 
 
