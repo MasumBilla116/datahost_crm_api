@@ -1,0 +1,8 @@
+vendor/
+**/.DS_Store
+/app/Helpers/LocalDir.php
+managebeds.sql
+composer.lock
+config/database.php
+.vscode
+.idea
