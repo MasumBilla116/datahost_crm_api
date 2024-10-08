@@ -105,6 +105,9 @@ use App\Controllers\RoomManagement\RoomCategory\RoomCategoryController;
 use App\Controllers\RoomManagement\RoomFacility\RoomFacilityController;
 use App\Controllers\RoomManagement\RoomPrice\HourlyRoomPriceController;
 use App\Controllers\HouseKeeping\LaundryVoucher\LaundryVoucherController;
+use App\Controllers\Inventory\UnitTypeController;
+use App\Controllers\Inventory\ItemTypeController;
+use App\Controllers\Purchase\PurchaseController;
 use App\Controllers\RosterManagement\Assignment\RosterAssignmnetController;
 
 return function (App $app) {
@@ -190,6 +193,11 @@ return function (App $app) {
     ######### ->Invoice Controller Start
     $app->get('/app/purchase/invoice', [InvoiceController::class, 'go']);
     $app->post('/app/purchase/invoice', [InvoiceController::class, 'go']);
+
+
+    ######### -> Purchase Controller
+    $app->get('/app/purchase-product', [PurchaseController::class, 'go']);
+    $app->post('/app/purchase-product', [PurchaseController::class, 'go']);
     ######### ->Invoice Controller End
 
     ######### -> Departments
@@ -219,6 +227,13 @@ return function (App $app) {
     //Inventory Management
     $app->get('/app/inventory/category', [CategoryController::class, 'go']);
     $app->post('/app/inventory/category', [CategoryController::class, 'go']);
+
+    $app->get('/app/inventory/unitType', [UnitTypeController::class, 'go']);
+    $app->post('/app/inventory/unitType', [UnitTypeController::class, 'go']);
+
+    $app->get('/app/inventory/itemType', [ItemTypeController::class, 'go']);
+    $app->post('/app/inventory/itemType', [ItemTypeController::class, 'go']);
+
     //Warehouse Management
     $app->get('/app/inventory/warehouse', [WarehouseController::class, 'go']);
     $app->post('/app/inventory/warehouse', [WarehouseController::class, 'go']);

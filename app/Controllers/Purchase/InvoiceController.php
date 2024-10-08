@@ -94,7 +94,7 @@ class   InvoiceController
                 $this->createSupplierInvoice($request);
                 break;
             case 'createSupplierInvoiceItem':
-                $this->createSupplierInvoiceItem();
+                $this->createSupplierInvoiceItem($request, $response);
                 break;
             case 'getAllSupplierInvoice':
                 $this->getAllSupplierInvoice();
@@ -1272,233 +1272,246 @@ class   InvoiceController
     }
 
     /**Create Supplier Invoice Item inv-item.tsx ---------- page frontend*/
-    public function createSupplierInvoiceItem()
+    public function createSupplierInvoiceItem(Request $request, Response $response)
     {
-
-// dd($this->params->invoice);
-// return;
-
-        $invoiceList = array();
-        $supplierInv = array();
-        $amount = 0;
-        $qty = 0;
-        //$supplierID = "";
-        $lastSupplierInvoiceID = $this->helper->getLastID('supplier_invoice');
-        //$lastSupplierInvoiceID += 1;
-        $now = Carbon::now();
-        $date = $now->format('ym');
-
-        $last_voucher = DB::table('supplier_invoice')
-            ->select('id')
-            ->orderBy('id', 'DESC')
-            ->first();
-        $voucher_id = $last_voucher->id + 1;
-        if ($voucher_id == null) {
-            $voucher_id = 1;
-        }
-        $invoice_number = sprintf('LINV-%s000%d', $date, $voucher_id);
-        $invoice_id = sprintf('INV-%s000%d', $date, $voucher_id);
         DB::beginTransaction();
 
+        try {
+            $this->validator->validate($request, [
+                "supplierID" => v::notEmpty(),
+                "invoice" => v::notEmpty(),
+            ]);
+            if ($this->validator->failed()) {
+                $this->success = false;
+                $this->responseMessage = $this->validator->errors;
+                return;
+            }
 
-                /**Common Invoice Insertion */
-                $supplier_invoice_id_gen =   DB::table('supplier_invoice')->insertGetId([
-                    'supplier_id' => $this->params->supplierID,
-                    'local_invoice' => $invoice_number,
-                    'status' => $this->params->status,
-                    'created_at' => $this->params->inv_date,
-                    'supplier_invoice' => $invoice_id,
-                    'total_amount' => $amount,
-                    'invoice_date' => $this->params->inv_date,
-                    'edit_attempt' => 0,
-                    'remarks' => $this->params->totalRemarks,
-                    'total_item_qty' => $qty,
-                    'created_by' => $this->user->id,
-                ]);
-
-        foreach ($this->params->invoice as $key => $value) {
-
-            // $supplierID = $this->invoice->where(["supplier_id" => $value['supplierID']])->first();
-
+            $invoiceList = array();
+            $supplierInv = array();
+            $amount = 0;
+            $qty = 0;
+            //$supplierID = "";
+            $lastSupplierInvoiceID = $this->helper->getLastID('supplier_invoice');
+            //$lastSupplierInvoiceID += 1;
             $now = Carbon::now();
+            $date = $now->format('ym');
 
-            $oldItem = $this->helper->getItem("qty,unit_cost", "inventory_items", $value["itemId"]);
+            $last_voucher = DB::table('supplier_invoice')
+                ->select('id')
+                ->orderBy('id', 'DESC')
+                ->first();
 
-            $oldQty = $oldItem[0]->qty;
-            $oldPrice = $oldItem[0]->unit_cost;
+            $voucher_id = $last_voucher->id + 1;
+            if ($voucher_id == null) {
+                $voucher_id = 1;
+            }
 
-            $purchasedQty = $value["qty"];
-            $purchaseRate = $value["unitPrice"];
+            $invoice_number = sprintf('LINV-%s000%d', $date, $voucher_id);
+            $invoice_id = sprintf('INV-%s000%d', $date, $voucher_id);
 
-            $newRate = ($oldPrice * $oldQty) + ($purchaseRate * $purchasedQty);
-            $newQty = $oldQty + $purchasedQty;
 
-            $newPrice = $newRate / $newQty;
 
-            $inventory = $this->inventory
-                ->where(["id" => $value["itemId"]])
-                ->update([
-                    'qty' => DB::raw('qty +' . $value["qty"]),
-                    'unit_cost' => $newPrice,
-                ]);
+            /**Common Invoice Insertion */
+            // @@ supplier_invoice as purchase 
+            $supplier_invoice_id_gen =   DB::table('supplier_invoice')->insertGetId([
+                'supplier_id' => $this->params->supplierID,
+                'local_invoice' => $invoice_number,
+                'status' => $this->params->status,
+                'created_at' => $this->params->inv_date,
+                'supplier_invoice' => $invoice_id,
+                'total_amount' => $amount,
+                'invoice_date' => $this->params->inv_date,
+                'edit_attempt' => 0,
+                'remarks' => $this->params->totalRemarks,
+                'total_item_qty' => $qty,
+                'created_by' => $this->user->id,
+            ]);
 
-            /**Inventory History */
-            $inventory_history[] = array(
-                "inventory_item_id" => $value["itemId"],
-                "edit_attempt" => 0,
-                "note" => "purchase_invoice",
-                "reference" => $lastSupplierInvoiceID,
-                "ref_type" => "supplier_purchase_invoice",
-                "action_by" => $this->user->id,
-                "old_qty" => $oldQty,
-                "affected_qty" => $purchasedQty,
-                "new_qty" => ($oldQty + $purchasedQty),
-                "old_price" => $oldPrice,
-                "new_price" => $purchaseRate,
-                "status" => 1,
-            );
-            /**Inventory History End */
 
-            /**
-             * !Supplier Invoice History
-             */
-            DB::table('supplier_invoice_history')
-                ->insert([
+            // print_r($this->params->invoice);
+            // return;
+
+            foreach ($this->params->invoice as $key => $value) {
+
+                // $supplierID = $this->invoice->where(["supplier_id" => $value['supplierID']])->first();
+
+                $now = Carbon::now();
+
+                $oldItem = $this->helper->getItem("qty,unit_cost", "inventory_items", $value["itemId"]);
+
+                $oldQty = $oldItem[0]->qty;
+                $oldPrice = $oldItem[0]->unit_cost;
+
+                $purchasedQty = $value["qty"];
+                $purchaseRate = $value["unitPrice"];
+
+                $newRate = ($oldPrice * $oldQty) + ($purchaseRate * $purchasedQty);
+                //          (1500 * 1) + (2000*1) = 1500 + 2000 = 3500
+                $newQty = $oldQty + $purchasedQty;  // 1 + 1 = 2
+
+                $newPrice = $newRate / $newQty; // 3500 / 2 =  1750
+
+                $this->inventory
+                    ->where(["id" => $value["itemId"]])
+                    ->update([
+                        'qty' => DB::raw('qty +' . $value["qty"]),
+                        'unit_cost' => $newPrice,
+                    ]);
+
+                /**Inventory History */
+                $inventory_history[] = array(
+                    "inventory_item_id" => $value["itemId"],
                     "edit_attempt" => 0,
-                    'reference' => $lastSupplierInvoiceID,
-                    'invoice_item_id' => $value["itemId"],
-                    'note' => 'Item Created into purchase invoice',
+                    "note" => "purchase_invoice",
+                    "reference" => $lastSupplierInvoiceID,
+                    "ref_type" => "supplier_purchase_invoice",
                     "action_by" => $this->user->id,
-                    "old_qty" => 0,
+                    "old_qty" => $oldQty,
                     "affected_qty" => $purchasedQty,
-                    "new_qty" => $purchasedQty,
+                    "new_qty" => ($oldQty + $purchasedQty),
                     "old_price" => $oldPrice,
                     "new_price" => $purchaseRate,
                     "status" => 1,
+                );
+                /**Inventory History End */
+
+                /**
+                 * !Supplier Invoice History
+                 */
+                DB::table('supplier_invoice_history')
+                    ->insert([
+                        "edit_attempt" => 0,
+                        'reference' => $lastSupplierInvoiceID,
+                        'invoice_item_id' => $value["itemId"],
+                        'note' => 'Item Created into purchase invoice',
+                        "action_by" => $this->user->id,
+                        "old_qty" => 0,
+                        "affected_qty" => $purchasedQty,
+                        "new_qty" => $purchasedQty,
+                        "old_price" => $oldPrice,
+                        "new_price" => $purchaseRate,
+                        "status" => 1,
+                    ]);
+
+
+                //<============ supplier_invoice_item table ================>
+                $invoiceList[] = array(
+                    'status' => $this->params->status,
+                    'created_at' => $this->params->inv_date,
+                    'unit_price' => $value["unitPrice"],
+                    'previous_purchase_rate' => $oldPrice,
+                    'qty' => $value["qty"],
+                    'previous_qty' => $oldQty,
+                    'item_id' => $value["itemId"],
+                    'supplier_invoice_id' => $supplier_invoice_id_gen,
+                    'remarks' => $value["remarks"],
+                    'created_by' => $this->user->id,
+                );
+                $amount += $value["total"];
+                $qty += $value["qty"];
+            }   //End loop
+
+            $getSlipId = $this->helper->getLastID('supplier_invoice');
+
+            //supplier_invoice'
+            // $supplierInv[] = array(
+            //     'supplier_id' => $this->params->supplierID,
+            //     'local_invoice' => "LP-".Carbon::now()->format('ym')."-".str_pad($getSlipId,6,"0",STR_PAD_LEFT),
+            //     'status' => $this->params->status,
+            //     'created_at' => $this->params->inv_date,
+            //     'supplier_invoice' => $this->params->inv_id,
+            //     'total_amount' => $amount,
+            //     'invoice_date' => $this->params->inv_date,
+            //     'edit_attempt' => 0,
+            //     'remarks' => $this->params->totalRemarks,
+            //     'total_item_qty' => $qty,
+            //     'created_by' => $this->user->id,
+            // );
+
+            // $val = $this->helper->getLastSupplierAccountBalance('account_supplier',$this->params->supplierID);
+            // $val = $this->helper->getLastSupplierAccountBalance($this->params->supplierID);
+            $val = DB::table('account_supplier')
+                // ->select('balance')
+                ->where('supplier_id', '=', $this->params->supplierID)
+                ->where('status', '=', 1)
+                ->orderBy('id', 'DESC')
+                ->first();
+
+            //Supplier balance adjust
+
+            DB::table('supplier')
+                ->where(["id" => $this->params->supplierID])
+                ->update([
+                    'balance' => ($val->balance - $amount),
                 ]);
 
-
-            //<============ supplier_invoice_item table ================>
-            $invoiceList[] = array(
-                'status' => $this->params->status,
-                'created_at' => $this->params->inv_date,
-                'unit_price' => $value["unitPrice"],
-                'previous_purchase_rate' => $oldPrice,
-                'qty' => $value["qty"],
-                'previous_qty' => $oldQty,
-                'item_id' => $value["itemId"],
-                'supplier_invoice_id' => $supplier_invoice_id_gen,
-                'remarks' => $value["remarks"],
+            $accountSupplier[] = array(
+                'supplier_id' => $this->params->supplierID,
+                'invoice_id' => $lastSupplierInvoiceID,
+                'inv_type' => "purchase",
+                'debit' => 0.00,
+                'credit' => $amount,
+                'balance' => ($val->balance - $amount),
+                'note' => "Due for purchase",
+                'status' => 1,
                 'created_by' => $this->user->id,
             );
-            $amount += $value["total"];
-            $qty += $value["qty"];
-        }   //End loop
 
-        $getSlipId = $this->helper->getLastID('supplier_invoice');
-
-        //supplier_invoice'
-        // $supplierInv[] = array(
-        //     'supplier_id' => $this->params->supplierID,
-        //     'local_invoice' => "LP-".Carbon::now()->format('ym')."-".str_pad($getSlipId,6,"0",STR_PAD_LEFT),
-        //     'status' => $this->params->status,
-        //     'created_at' => $this->params->inv_date,
-        //     'supplier_invoice' => $this->params->inv_id,
-        //     'total_amount' => $amount,
-        //     'invoice_date' => $this->params->inv_date,
-        //     'edit_attempt' => 0,
-        //     'remarks' => $this->params->totalRemarks,
-        //     'total_item_qty' => $qty,
-        //     'created_by' => $this->user->id,
-        // );
-
-        // $val = $this->helper->getLastSupplierAccountBalance('account_supplier',$this->params->supplierID);
-        // $val = $this->helper->getLastSupplierAccountBalance($this->params->supplierID);
-        $val = DB::table('account_supplier')
-            // ->select('balance')
-            ->where('supplier_id', '=', $this->params->supplierID)
-            ->where('status', '=', 1)
-            ->orderBy('id', 'DESC')
-            ->first();
-
-        //Supplier balance adjust
-
-        DB::table('supplier')
-            ->where(["id" => $this->params->supplierID])
-            ->update([
-                'balance' => ($val->balance - $amount),
+            $accountAsset = DB::table('account_asset')->insert([
+                "invoice" => $lastSupplierInvoiceID,
+                "sector" => 1,
+                "inv_type" => "purchase_invoice",
+                "debit" => $amount,
+                "credit" => 0.00,
+                "note" => "Items purchased from supplier",
+                "created_by" => $this->user->id,
+                "status" => 1,
             ]);
 
-        $accountSupplier[] = array(
-            'supplier_id' => $this->params->supplierID,
-            'invoice_id' => $lastSupplierInvoiceID,
-            'inv_type' => "purchase",
-            'debit' => 0.00,
-            'credit' => $amount,
-            'balance' => ($val->balance - $amount),
-            'note' => "Due for purchase",
-            'status' => 1,
-            'created_by' => $this->user->id,
-        );
+            $accountLiabilities = DB::table('account_liabilities')->insert([
+                "sector" => 10,
+                "invoice" => $lastSupplierInvoiceID,
+                "inv_type" => "purchase_invoice",
+                "debit" => $amount,
+                "credit" => 0.00,
+                "note" => "Items purchased from supplier",
+                "created_by" => $this->user->id,
+                "status" => 1,
+            ]);
 
-        $accountAsset = DB::table('account_asset')->insert([
-            "invoice" => $lastSupplierInvoiceID,
-            "sector" => 1,
-            "inv_type" => "purchase_invoice",
-            "debit" => $amount,
-            "credit" => 0.00,
-            "note" => "Items purchased from supplier",
-            "created_by" => $this->user->id,
-            "status" => 1,
-        ]);
+            /**DB pushing */
 
-        $accountLiabilities = DB::table('account_liabilities')->insert([
-            "sector" => 10,
-            "invoice" => $lastSupplierInvoiceID,
-            "inv_type" => "purchase_invoice",
-            "debit" => $amount,
-            "credit" => 0.00,
-            "note" => "Items purchased from supplier",
-            "created_by" => $this->user->id,
-            "status" => 1,
-        ]);
+            /**Item Wise insertion */
+            DB::table('supplier_invoice_item')->insert($invoiceList);
 
-        /**DB pushing */
+            $lastSupId = DB::table('supplier_invoice')
+                // ->select('balance')
+                ->where('supplier_id', '=', $this->params->supplierID)
+                ->where('status', '=', 1)
+                ->orderBy('id', 'DESC')
+                ->first();
 
-        /**Item Wise insertion */
-        DB::table('supplier_invoice_item')->insert($invoiceList);
+            $lastSupplierInvoiceid = $lastSupplierInvoiceID;
+            $lastSupplierInvoiceid += 1;
 
-        $lastSupId = DB::table('supplier_invoice')
-            // ->select('balance')
-            ->where('supplier_id', '=', $this->params->supplierID)
-            ->where('status', '=', 1)
-            ->orderBy('id', 'DESC')
-            ->first();
+            /**Account Supplier Insertion  */
+            DB::table('account_supplier')->insert($accountSupplier);
 
+            /**Operation Inventory_history */
+            DB::table('inventory_item_history')->insert($inventory_history);
 
-        
-        
+            DB::commit();
 
-
-
-        $lastSupplierInvoiceid = $lastSupplierInvoiceID;
-        $lastSupplierInvoiceid += 1;
-
-
-
-
-
-        /**Account Supplier Insertion  */
-        DB::table('account_supplier')->insert($accountSupplier);
-
-        /**Operation Inventory_history */
-        DB::table('inventory_item_history')->insert($inventory_history);
-
-        DB::commit();
-
-        $this->responseMessage = "Supplier Invoice Item Created Successfully!";
-        $this->outputData =  $invoiceList;
-        $this->success = true;
+            $this->responseMessage = "Supplier Invoice Item Created Successfully!";
+            $this->outputData =  $invoiceList;
+            $this->success = true;
+        } catch (\Exception $th) {
+            DB::rollback();
+            $this->responseMessage = "Invoice Item Creation fails!";
+            $this->outputData =  [];
+            $this->success = false;
+        }
     }
 
 
