@@ -93,6 +93,7 @@ class ItemController
             "category_id" => v::notEmpty(),
             "item_type" => v::notEmpty(),
             "unit_type" => v::notEmpty(),
+            "supplier_id" =>  v::notEmpty(),
         ]);
 
         if ($this->validator->failed()) {
@@ -105,6 +106,7 @@ class ItemController
 
         $insertData = [
             "item_name" => ucfirst($this->params->name),
+            "supplier_id" => $this->params->supplier_id,
             "category_id" => $this->params->category_id,
             "item_type_id" => $this->params->item_type,
             "unit_type_id" => $this->params->unit_type,
@@ -125,12 +127,14 @@ class ItemController
             "category_id" => v::notEmpty(),
             "item_type_id" => v::notEmpty(),
             "unit_type_id" => v::notEmpty(),
+            "supplier_id" =>  v::notEmpty(),
         ]);
 
         $status = $status = $this->params->status ?  1  : 0;
 
         $updateData = [
             "item_name" => ucfirst($this->params->name),
+            "supplier_id" => $this->params->supplier_id,
             "category_id" => $this->params->category_id,
             "item_type_id" => $this->params->item_type_id,
             "unit_type_id" => $this->params->unit_type_id,
@@ -182,6 +186,8 @@ class ItemController
             ->select(
                 'items.id as item_id',
                 'items.item_name',
+                'supplier.name as supplier_name',
+                'supplier.id as supplier_id',
                 'inventory_categories.name as category_name',
                 'inventory_categories.id as category_id',
                 'item_types.item_type_name',
@@ -190,6 +196,8 @@ class ItemController
                 'unit_types.unit_type_name',
                 'unit_types.id as unit_type_id',
             )
+            ->join('supplier', 'supplier.id', '=', 'items.supplier_id')
+            ->where("inventory_categories.status", 1)
             ->join('inventory_categories', 'inventory_categories.id', '=', 'items.category_id')
             ->where("inventory_categories.status", 1)
             ->join('unit_types', 'unit_types.id', '=', 'items.unit_type_id')
@@ -281,9 +289,7 @@ class ItemController
             'items.status',
             'unit_types.unit_type_name',
             'unit_types.id as unit_type_id',
-        )
-
-            ->join('inventory_categories', 'inventory_categories.id', '=', 'items.category_id')
+        )->join('inventory_categories', 'inventory_categories.id', '=', 'items.category_id')
             ->where("inventory_categories.status", 1)
             ->join('unit_types', 'unit_types.id', '=', 'items.unit_type_id')
             ->where("unit_types.status", 1)

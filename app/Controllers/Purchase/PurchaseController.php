@@ -81,12 +81,27 @@ class   PurchaseController
             case 'purchase':
                 $this->purchase($request, $response);
                 break;
+
             case 'getAllPaymentTypes':
                 $this->getAllPaymentTypes($request, $response);
                 break;
             case 'getPurchaseInvoiceList':
                 $this->getPurchaseInvoiceList($request, $response);
                 break;
+            case 'deleteInvoice':
+                $this->deleteInvoice($request, $response);
+                break;
+
+            case 'createPurchaseRequisition':
+                $this->createPurchaseRequisition($request, $response);
+                break;
+            case 'fetchPurchaseRequisitionList':
+                $this->fetchPurchaseRequisitionList($request, $response);
+                break;
+            case 'getPurchaseRequisitionDetails':
+                $this->getPurchaseRequisitionDetails($request, $response);
+                break;
+
             default:
                 $this->responseMessage = "Invalid request!";
                 return $this->customResponse->is400Response($response, $this->responseMessage);
@@ -262,8 +277,6 @@ class   PurchaseController
         }
     }
 
-
-
     public function getAllPaymentTypes(Request $request, Response $response)
     {
         try {
@@ -287,20 +300,234 @@ class   PurchaseController
     public function getPurchaseInvoiceList()
     {
         try {
-            $invoice = DB::table("purchase")->select("purchase.*", "supplier.name")
+
+            $pageNo = $_GET['page'];
+            $perPageShow = $_GET['perPageShow'];
+            $totalRow = 0;
+            $filter = $this->params->filterValue;
+
+
+            $invoiceQuery = DB::table("purchase")->select("purchase.*", "supplier.name")
                 ->join("supplier", "supplier.id", "=", "purchase.supplier_id")
-                ->orderBy("purchase.id", "desc")
+                ->where("purchase.status", 1);
+
+
+            if ($filter['status'] === "deleted") {
+                $invoiceQuery->where("purchase.status", 0);
+            } else if ($filter['status'] === "daily") {
+                $invoiceQuery->whereDate("purchase.purchase_date", date("Y-m-d"));
+            } else if ($filter['status'] === "weekly") {
+                $invoiceQuery->whereBetween("purchase.purchase_date", [Carbon::now()->startOfWeek(), Carbon::now()->endOfWeek()]);
+            } else if ($filter['status'] === "monthly") {
+                $invoiceQuery->whereYear("purchase.purchase_date", date("Y"))
+                    ->whereMonth("purchase.purchase_date", date("m"));
+            } else if ($filter['status'] === "yearly") {
+                $invoiceQuery->whereYear("purchase.purchase_date", date("Y"));
+            }
+
+
+            if (!empty($filter['search'])) {
+                $search = $filter['search'];
+                $invoiceQuery->where(function ($query) use ($search) {
+                    $query->orWhere("supplier.name", "LIKE", "%" . $search . "%")
+                        ->orWhere("purchase.purchase_invoice", "LIKE", "%" . $search . "%");
+                });
+            }
+
+
+            $invoice = $invoiceQuery->orderBy("purchase.id", "desc")
+                ->offset(($pageNo - 1) * $perPageShow)
+                ->limit($perPageShow)
                 ->get();
 
-            if (!empty($invoice)) {
-                $this->outputData = $invoice;
-            }
+
+            $totalRow = $invoiceQuery->count();
+            $this->outputData = [
+                $pageNo => $invoice,
+                "total" => $totalRow
+            ];
 
             $this->responseMessage = "Purchase invoice fetch successfully";
             $this->success = true;
         } catch (\Exception $th) {
+            $this->responseMessage = "Something is wrong " . $th->getMessage();
+            $this->outputData =  [];
+            $this->success = false;
+        }
+    }
+
+
+
+    public function deleteInvoice()
+    {
+        try {
+            $purchaseId = $this->params->id;
+            if (empty($purchaseId)) {
+                $this->responseMessage = "Missing your items";
+                $this->outputData =  [];
+                $this->success = false;
+                return;
+            }
+
+            DB::table("purchases")->where("id", $purchaseId)->update(["status" => 0]);
+
+            $this->responseMessage = "Purchase invoice deleted successfull";
+            $this->outputData =  [];
+            $this->success = true;
+        } catch (\Exception $th) {
             $this->responseMessage = "Something is wrong";
             $this->outputData =  [];
+            $this->success = false;
+        }
+    }
+
+
+    // @@ purchase requisition
+    public function createPurchaseRequisition(Request $request, Response $response)
+    {
+
+        DB::beginTransaction();
+        try {
+
+            $this->validator->validate($request, [
+                "invoice" => v::notEmpty(),
+                "requisition_title" => v::notEmpty()
+            ]);
+
+            // Early return if validation fails
+            if ($this->validator->failed()) {
+                $this->success = false;
+                $this->responseMessage = $this->validator->errors;
+                return;
+            }
+
+
+            $requisition_title = $this->params->requisition_title;
+            $items = $this->params->invoice;
+            $totalItem  = count($items);
+            $request_date = $this->params->request_date;
+            $status = $this->params->requisition_status;
+            $remarks = $this->params->remarks;
+            $approved_date = null;
+
+            if (strtolower($status) === "approve") {
+                $approved_date = $request_date;
+            }
+
+
+            $requisitionId = DB::table("purchase_requisitions")->insertGetId([
+                "requisition_title" => $requisition_title,
+                "quantity" =>  $totalItem,
+                "request_date" => $request_date,
+                "approved_date" => $approved_date,
+                "status" => $status,
+                'remark' => $remarks
+            ]);
+
+            $requisitionItems = array();
+            foreach ($items as $key => $item) {
+                $requisitionItems[] = [
+                    "purchase_requisition_id" => $requisitionId,
+                    "item_id" => $item['itemId'],
+                    "quantity" => $item['qty'],
+                ];
+            }
+
+            DB::table("purchase_requisition_items")->insert($requisitionItems);
+            // Commit the transaction
+            DB::commit();
+            $this->responseMessage = "Purchase created successfully";
+            $this->outputData = [];
+            $this->success = true;
+        } catch (\Exception $th) {
+            DB::rollback();
+            $this->responseMessage = "Invoice item creation failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+
+    public function fetchPurchaseRequisitionList(Request $request, Response $response)
+    {
+        try {
+            $pageNo = $_GET['page'];
+            $perPageShow = $_GET['perPageShow'];
+            $totalRow = 0;
+            $filter = $this->params->filterValue;
+
+
+            $requisitionQuery = DB::table("purchase_requisitions")
+                ->where("status", "Pending");
+
+
+            if ($filter['status'] === "Approve") {
+                $requisitionQuery->where("status", "Approve");
+            } else if ($filter['status'] === "Cancel") {
+                $requisitionQuery->where("status", "Cancel");
+            }
+
+
+            if (!empty($filter['search'])) {
+                $search = $filter['search'];
+                $requisitionQuery->where(function ($query) use ($search) {
+                    $query->orWhere("title", "LIKE", "%" . $search . "%")
+                        ->orWhere("request_date", "LIKE", "%" . $search . "%")
+                        ->orWhere("approved_date", "LIKE", "%" . $search . "%");
+                });
+            }
+
+
+            $requisition = $requisitionQuery->orderBy("id", "desc")
+                ->offset(($pageNo - 1) * $perPageShow)
+                ->limit($perPageShow)
+                ->get();
+
+
+            $totalRow = $requisitionQuery->count();
+            $this->outputData = [
+                $pageNo => $requisition,
+                "total" => $totalRow
+            ];
+            $this->responseMessage = "Purchase Requisition fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Purchase Requisition fetch failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+
+    public function getPurchaseRequisitionDetails(Request $request, Response $response)
+    {
+        try {
+            $requisition_id = $this->params->purchase_requisition_id;
+
+            if (empty($requisition_id)) {
+                $this->outputData = [];
+                $this->responseMessage = "Paramiter is missiong";
+                $this->success = false;
+            }
+
+            $requisitionDetails = DB::table("purchase_requisitions")->select(
+                "purchase_requisitions.*",
+                "items.item_name",
+                "purchase_requisition_items.quantity"
+            )
+                ->join("purchase_requisition_items", "purchase_requisition_items.purchase_requisition_id", "=", "purchase_requisitions.id")
+                ->where('purchase_requisitions.id', $requisition_id)
+                ->join("items", "items.id", "=", "purchase_requisition_items.item_id")
+                ->get();
+
+
+
+            $this->outputData = $requisitionDetails;
+            $this->responseMessage = "Purchase Requisition fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Purchase Requisition fetch failed: " . $th->getMessage();
+            $this->outputData = [];
             $this->success = false;
         }
     }
