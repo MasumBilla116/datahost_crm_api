@@ -102,6 +102,18 @@ class   PurchaseController
                 $this->getPurchaseRequisitionDetails($request, $response);
                 break;
 
+            case 'getPurchaseRequisitionEditInfo':
+                $this->getPurchaseRequisitionEditInfo($request, $response);
+                break;
+
+            case 'getPurchaseRequisitionInfo':
+                $this->getPurchaseRequisitionInfo($request, $response);
+                break;
+
+            case 'deletePurchaseRequisition':
+                $this->deletePurchaseRequisition($request, $response);
+                break;
+
             default:
                 $this->responseMessage = "Invalid request!";
                 return $this->customResponse->is400Response($response, $this->responseMessage);
@@ -406,23 +418,46 @@ class   PurchaseController
             $items = $this->params->invoice;
             $totalItem  = count($items);
             $request_date = $this->params->request_date;
+            $approved_date = $this->params->approved_date;
             $status = $this->params->requisition_status;
             $remarks = $this->params->remarks;
-            $approved_date = null;
+            $purchase_requisition_id = $this->params->purchase_requisition_id;
 
             if (strtolower($status) === "approve") {
                 $approved_date = $request_date;
             }
 
+            if (!empty($purchase_requisition_id)) {
+                $requisitionId = $purchase_requisition_id;
 
-            $requisitionId = DB::table("purchase_requisitions")->insertGetId([
-                "requisition_title" => $requisition_title,
-                "quantity" =>  $totalItem,
-                "request_date" => $request_date,
-                "approved_date" => $approved_date,
-                "status" => $status,
-                'remark' => $remarks
-            ]);
+                DB::table("purchase_requisitions")
+                    ->where([
+                        "id" => $purchase_requisition_id
+                    ])
+                    ->update([
+                        "requisition_title" => $requisition_title,
+                        "quantity" =>  $totalItem,
+                        "request_date" => $request_date,
+                        "approved_date" => $approved_date,
+                        "status" => $status,
+                        'remark' => $remarks
+                    ]);
+
+                DB::table('purchase_requisition_items')->where([
+                    "purchase_requisition_id" => $purchase_requisition_id
+                ])->delete();
+            } else {
+                $requisitionId = DB::table("purchase_requisitions")->insertGetId([
+                    "requisition_title" => $requisition_title,
+                    "quantity" =>  $totalItem,
+                    "request_date" => $request_date,
+                    "approved_date" => $approved_date,
+                    "status" => $status,
+                    'remark' => $remarks
+                ]);
+            }
+
+
 
             $requisitionItems = array();
             foreach ($items as $key => $item) {
@@ -457,14 +492,15 @@ class   PurchaseController
             $filter = $this->params->filterValue;
 
 
-            $requisitionQuery = DB::table("purchase_requisitions")
-                ->where("status", "Pending");
+            $requisitionQuery = DB::table("purchase_requisitions");
 
 
             if ($filter['status'] === "Approve") {
                 $requisitionQuery->where("status", "Approve");
             } else if ($filter['status'] === "Cancel") {
                 $requisitionQuery->where("status", "Cancel");
+            } else {
+                $requisitionQuery->where("status", "Pending");
             }
 
 
@@ -527,6 +563,111 @@ class   PurchaseController
             $this->success = true;
         } catch (\Exception $th) {
             $this->responseMessage = "Purchase Requisition fetch failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+
+
+    public function getPurchaseRequisitionEditInfo(Request $request, Response $response)
+    {
+        try {
+            $purchaseRequisitionId = $this->params->requisition_id;
+
+            if (empty($purchaseRequisitionId)) {
+                $this->responseMessage = "Purchase Requisition params is missing ";
+                $this->outputData = [];
+                $this->success = false;
+                return;
+            }
+
+            $purchaseRequisitionInfo = DB::table("purchase_requisitions")
+                ->select(
+                    "purchase_requisitions.id as purchase_requisition_id",
+                    "purchase_requisitions.requisition_title",
+                    "purchase_requisitions.quantity as total_quantity",
+                    "purchase_requisitions.request_date",
+                    "purchase_requisitions.approved_date",
+                    "purchase_requisitions.remark",
+                    "purchase_requisitions.status",
+                    "purchase_requisition_items.quantity",
+                    "purchase_requisition_items.item_id",
+                    "items.item_name",
+                    "item_types.item_type_name"
+                )
+                ->join("purchase_requisition_items", "purchase_requisition_items.purchase_requisition_id", "=", "purchase_requisitions.id")
+                ->join("items", "items.id", "=", "purchase_requisition_items.item_id")
+                ->join("item_types", "item_types.id", "=", "items.item_type_id")
+                ->where("purchase_requisitions.id", $purchaseRequisitionId)
+                ->get();
+
+
+            $this->outputData = $purchaseRequisitionInfo;
+            $this->responseMessage = "Purchase Requisition fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Purchase Requisition fetch failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+
+    public function getPurchaseRequisitionInfo(Request $request, Response $response)
+    {
+        try {
+
+            $purchaseRequisitionInfo = DB::table("purchase_requisitions")
+                ->select(
+                    "purchase_requisitions.id as purchase_requisition_id",
+                    "purchase_requisitions.requisition_title",
+                    "purchase_requisitions.quantity as total_quantity",
+                    "purchase_requisitions.request_date",
+                    "purchase_requisitions.approved_date",
+                    "purchase_requisitions.remark",
+                    "purchase_requisitions.status",
+                    "purchase_requisition_items.quantity",
+                    "purchase_requisition_items.item_id",
+                    "items.item_name",
+                    "items.unit_type_id",
+                    "item_types.item_type_name"
+                )
+                ->join("purchase_requisition_items", "purchase_requisition_items.purchase_requisition_id", "=", "purchase_requisitions.id")
+                ->join("items", "items.id", "=", "purchase_requisition_items.item_id")
+                ->join("item_types", "item_types.id", "=", "items.item_type_id")
+                // ->where([
+                //     "purchase_requisitions.status" => "Approve"
+                // ])
+                ->groupBy("purchase_requisition_items.purchase_requisition_id")
+                ->get();
+
+
+            $this->outputData = $purchaseRequisitionInfo;
+            $this->responseMessage = "Purchase Requisition fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Purchase Requisition fetch failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+
+    public function deletePurchaseRequisition(Request $request, Response $response)
+    {
+        try {
+            $purchaseRequisitionId = $this->params->id;
+
+            DB::table("purchase_requisitions")->where("id", $purchaseRequisitionId)->delete();
+            DB::table("purchase_requisition_items")->where("purchase_requisition_id", $purchaseRequisitionId)->delete();
+
+
+            $this->outputData = [];
+            $this->responseMessage = "Purchase Requisition deleted successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Purchase Requisition deleted failed: " . $th->getMessage();
             $this->outputData = [];
             $this->success = false;
         }

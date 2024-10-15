@@ -63,9 +63,9 @@ class StockController
                 $this->getAllStocks($request, $response);
                 break;
 
-                case 'getAllStocksList':
-                    $this->getAllStocksList($request, $response);
-                    break;
+            case 'getAllStocksList':
+                $this->getAllStocksList($request, $response);
+                break;
 
                 // getAllStocksList
 
@@ -87,51 +87,44 @@ class StockController
     public function getAllStocks()
     {
 
-     
+
         $filter = $this->params->filterValue;
         $categoryId = $this->params->categoryId;
- 
-        if($categoryId){
-            $categories = $this->items
-            ->with(['inventoryCategory','creator','updator'])
-            ->where('inventory_category_id',$categoryId)
-            ->where('status',1)
-            ->orderBy('id','desc')
-            ->get();
-        }
-        else if($filter == 'one-time-usable'){
-            $categories = $this->items
-            ->with(['inventoryCategory','creator','updator'])
-            ->where('item_type','one-time-usable')
-            ->where('status',1)
-            ->orderBy('id','desc')
-            ->get();
-        }
 
-        else if($filter == 'long-time-usable'){
+        if ($categoryId) {
             $categories = $this->items
-            ->with(['inventoryCategory','creator','updator'])
-            ->where('item_type','long-time-usable')
-            ->where('status',1)
-            ->orderBy('id','desc')
-            ->get();
-        }
-
-        else if($filter == 'depreciable-item'){
+                ->with(['inventoryCategory', 'creator', 'updator'])
+                ->where('inventory_category_id', $categoryId)
+                ->where('status', 1)
+                ->orderBy('id', 'desc')
+                ->get();
+        } else if ($filter == 'one-time-usable') {
             $categories = $this->items
-            ->with(['inventoryCategory','creator','updator'])
-            ->where('item_type','depreciable-item')
-            ->where('status',1)
-            ->orderBy('id','desc')
-            ->get();
-        }
-
-        else {
+                ->with(['inventoryCategory', 'creator', 'updator'])
+                ->where('item_type', 'one-time-usable')
+                ->where('status', 1)
+                ->orderBy('id', 'desc')
+                ->get();
+        } else if ($filter == 'long-time-usable') {
             $categories = $this->items
-            ->with(['inventoryCategory','creator','updator'])
-            ->where('status',1)
-            ->orderBy('id','desc')
-            ->get(); 
+                ->with(['inventoryCategory', 'creator', 'updator'])
+                ->where('item_type', 'long-time-usable')
+                ->where('status', 1)
+                ->orderBy('id', 'desc')
+                ->get();
+        } else if ($filter == 'depreciable-item') {
+            $categories = $this->items
+                ->with(['inventoryCategory', 'creator', 'updator'])
+                ->where('item_type', 'depreciable-item')
+                ->where('status', 1)
+                ->orderBy('id', 'desc')
+                ->get();
+        } else {
+            $categories = $this->items
+                ->with(['inventoryCategory', 'creator', 'updator'])
+                ->where('status', 1)
+                ->orderBy('id', 'desc')
+                ->get();
         }
 
         $this->responseMessage = "Item list fetched successfully";
@@ -141,78 +134,86 @@ class StockController
 
 
 
-    public function getAllStocksList(){
+    public function getAllStocksList()
+    {
 
-        $pageNo = $_GET['page'];
-        $perPageShow = $_GET['perPageShow'];
-        $totalRow = 0;
-        $filter = $this->params->filterValue;
+        try {
 
 
-        $query = $this->items
-        ->with(['inventoryCategory','creator','updator']);
-        // ->where('status',1);
+            $pageNo = $_GET['page'];
+            $perPageShow = $_GET['perPageShow'];
+            $totalRow = 0;
+            $filter = $this->params->filterValue;
 
-        if (!$query) {
-            $this->success = false;
-            $this->responseMessage = "No data found!";
-            return;
+
+            $query = DB::table("item_variations")
+            ->select(
+                "items.item_name",
+                "purchase.unit_price",
+            )
+            ->join('purchase',"purchase.id",'=',"item_variations.")
+            ->join("items","items.id","=","item_variations.item_id")
+            // ->where('status',1);
+
+            if (!$query) {
+                $this->success = false;
+                $this->responseMessage = "No data found!";
+                return;
+            }
+
+            if ($filter['status'] == 'all') {
+                $query->where('status', '=', 1);
+            }
+
+            if ($filter['status'] == 'deleted') {
+                $query->where('status', '=', 0);
+            }
+
+            if ($filter['status'] == 'one-time-usable') {
+                $query->where('item_type', 'one-time-usable');
+            }
+
+            if ($filter['status'] == 'long-time-usable') {
+                $query->where('item_type', 'long-time-usable');
+            }
+
+            if ($filter['status'] == 'depreciable-item') {
+                $query->where('item_type', 'depreciable-item');
+            }
+
+
+            if (isset($filter['search'])) {
+                $search = $filter['search'];
+
+                $query->where(function ($query) use ($search) {
+                    $query->orWhere('name', 'LIKE', '%' . $search . '%', 'i');
+                });
+            }
+
+            $all_list =  $query->orderBy('inventory_items.id', 'desc')
+                ->offset(($pageNo - 1) * $perPageShow)
+                ->limit($perPageShow)
+                ->get();
+
+
+            if ($pageNo == 1) {
+                $totalRow = $query->count();
+            }
+
+
+            $this->responseMessage = "Stock list fetch successfully";
+            $this->outputData = [
+                $pageNo => $all_list,
+                'total' => $totalRow,
+            ];
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Stock list fetch successfully";
+            $this->outputData = [
+                $pageNo => [],
+                'total' => 0,
+            ];
+            $this->success = true;
         }
-
-        if ($filter['status'] == 'all') {
-            $query->where('status', '=', 1);
-        }
-
-        if ($filter['status'] == 'deleted') {
-            $query->where('status', '=', 0);
-        }
-
-        if ($filter['status'] == 'one-time-usable') {
-            $query ->where('item_type','one-time-usable');
-        }
-
-        if ($filter['status'] == 'long-time-usable') {
-            $query->where('item_type','long-time-usable');
-        }
-
-        if ($filter['status'] == 'depreciable-item') {
-            $query->where('item_type','depreciable-item');
-        }
-
-
-        if (isset($filter['search'])) {
-            $search = $filter['search'];
-
-            $query->where(function ($query) use ($search) {
-                $query->orWhere('name', 'LIKE', '%' . $search . '%', 'i');
-            });
-        }
-
-        $all_list =  $query->orderBy('inventory_items.id', 'desc')
-        ->offset(($pageNo - 1) * $perPageShow)
-        ->limit($perPageShow)
-        ->get();
-
-
-    if ($pageNo == 1) {
-        $totalRow = $query->count();
     }
-
-
-        $this->responseMessage = "Item list fetched successfully";
-        $this->outputData = [
-            $pageNo => $all_list,
-            'total' => $totalRow,
-        ];
-        $this->success = true;
-    }
-
-
-
-
-
-  
-
-
-   
 }
