@@ -147,13 +147,18 @@ class StockController
 
 
             $query = DB::table("item_variations")
-            ->select(
-                "items.item_name",
-                "purchase.unit_price",
-            )
-            ->join('purchase',"purchase.id",'=',"item_variations.")
-            ->join("items","items.id","=","item_variations.item_id")
-            // ->where('status',1);
+                ->select(
+                    "item_variations.sales_price",
+                    "item_variations.stock",
+                    "items_tbl.item_name",
+                    "item_types.item_type_name",
+                    "purchase.unit_price",
+                )
+                ->join('purchase_variations as pv1', "pv1.item_variation_id", '=', "item_variations.id")
+                ->join('purchase', "purchase.id", '=', "pv1.purchase_id")
+                ->join("items as items_tbl", "items_tbl.id", "=", "item_variations.item_id")
+                ->join("item_types", "item_types.id", "=", "items_tbl.item_type_id");
+
 
             if (!$query) {
                 $this->success = false;
@@ -161,36 +166,24 @@ class StockController
                 return;
             }
 
-            if ($filter['status'] == 'all') {
-                $query->where('status', '=', 1);
-            }
 
-            if ($filter['status'] == 'deleted') {
-                $query->where('status', '=', 0);
-            }
-
-            if ($filter['status'] == 'one-time-usable') {
-                $query->where('item_type', 'one-time-usable');
-            }
-
-            if ($filter['status'] == 'long-time-usable') {
-                $query->where('item_type', 'long-time-usable');
-            }
-
-            if ($filter['status'] == 'depreciable-item') {
-                $query->where('item_type', 'depreciable-item');
+            if ($filter['status'] == 'in_stock') {
+                $query->where("item_variations.stock", ">", 0);
+            } else if ($filter['status'] == 'stock_out') {
+                $query->where("item_variations.stock", "=", 0);
             }
 
 
-            if (isset($filter['search'])) {
+            if (!empty($filter['search'])) {
                 $search = $filter['search'];
-
                 $query->where(function ($query) use ($search) {
-                    $query->orWhere('name', 'LIKE', '%' . $search . '%', 'i');
+                    $query->orWhere('items.item_name', 'LIKE', '%' . $search . '%', 'i');
                 });
             }
 
-            $all_list =  $query->orderBy('inventory_items.id', 'desc')
+
+            $all_list =  $query->orderBy("item_variations.id", "DESC")
+                ->groupBy("item_variations.id")
                 ->offset(($pageNo - 1) * $perPageShow)
                 ->limit($perPageShow)
                 ->get();
@@ -208,7 +201,7 @@ class StockController
             ];
             $this->success = true;
         } catch (\Exception $th) {
-            $this->responseMessage = "Stock list fetch successfully";
+            $this->responseMessage = "Stock list fetch successfully -> " . $th->getMessage();
             $this->outputData = [
                 $pageNo => [],
                 'total' => 0,

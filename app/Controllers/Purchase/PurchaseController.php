@@ -171,11 +171,31 @@ class   PurchaseController
             $account_asset = [];
             $accountSupplier = [];
             $account_liabilities = [];
+            $prev_purchase_variation = [];
 
             // Initialize totals
             $total_amount = 0;
             $total_quantity = 0;
             $creditPrice = array();
+
+            // Fetch all relevant item variations in one query
+            $item_ids = array_column($products, 'itemId');
+            $unit_type_ids = array_column($products, 'unit_type_id');
+            $sales_prices = array_column($products, 'salesPrice');
+
+            // print_r($item_ids);
+
+            $existingVariations = DB::table('item_variations')
+                ->whereIn('item_id', $item_ids)
+                ->whereIn('unit_type_id', $unit_type_ids)
+                ->whereIn('sales_price', $sales_prices)
+                ->get()
+                ->keyBy(function ($item) {
+                    return $item->item_id . '_' . $item->unit_type_id . '_' . $item->sales_price;
+                });
+
+
+
 
             // Loop through products and prepare insert arrays
             foreach ($products as $key => $value) {
@@ -199,13 +219,29 @@ class   PurchaseController
                     "payment_type_id" => $payment_type_id,
                 ];
 
-                // Item variation
-                $itemVariations[] = [
-                    "item_id" => $item_id,
-                    "unit_type_id" => $unit_type_id,
-                    "sales_price" => $sales_price,
-                    "stock" => $qty,
-                ];
+
+                $key = $item_id . "_" . $unit_type_id . "_" . $sales_price;
+
+               
+                if (!empty($existingVariations[$key])) {
+                    $existingVariation = $existingVariations[$key];
+                    $update_stock = $existingVariation->stock + $qty;
+                    $prev_purchase_variation[] = [
+                        'item_id' => $item_id,
+                        'unit_type_id' => $unit_type_id,
+                        'sales_price' => $sales_price,
+                        'stock' => $update_stock
+                    ];
+                } else {
+                    // Item variation
+                    $itemVariations[] = [
+                        "item_id" => $item_id,
+                        "unit_type_id" => $unit_type_id,
+                        "sales_price" => $sales_price,
+                        "stock" => $qty,
+                    ];
+                }
+
 
                 // Account transactions
                 $account_asset[] = [
@@ -255,6 +291,17 @@ class   PurchaseController
 
             DB::table("item_variations")->insert($itemVariations);
             $itemVariationIds = DB::getPdo()->lastInsertId();
+
+            // update previous purchase item variations
+            foreach ($prev_purchase_variation as $variation) {
+                DB::table("item_variations")
+                    ->where([
+                        'item_id' => $variation['item_id'],
+                        'unit_type_id' => $variation['unit_type_id'],
+                        'sales_price' => $variation['sales_price']
+                    ])
+                    ->update(['stock' => $variation['stock']]);
+            }
 
             // Link purchase and item variation
             foreach ($purchase as $i => $p) {

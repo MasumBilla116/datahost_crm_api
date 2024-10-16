@@ -1114,8 +1114,6 @@ class   InvoiceController
     }
 
 
-
-
     /**Getting Supplier Return Invoice List */
     public function getAllSupplierReturnInvoice()
     {
@@ -1206,7 +1204,9 @@ class   InvoiceController
             $this->responseMessage = "Parameter missing";
             return;
         }
-        $inv = $this->invoice->find($this->params->supplier_invoice_id);
+
+        $purchaseid = $this->params->supplier_invoice_id;
+        $inv = DB::table("purchase")->where("id", $purchaseid)->first();
 
         if ($inv->status == 0) {
             $this->success = false;
@@ -1220,21 +1220,31 @@ class   InvoiceController
             return;
         }
 
-        $inv_list = $this->helper->getInvoiceDetails($this->params->supplier_invoice_id);
+        $inv_list = DB::table("purchase")
+            ->select(
+                "purchase.purchase_invoice",
+                "purchase.unit_price",
+                "purchase.quantity",
+                "purchase.purchase_date",
+                "item_variations.stock",
+                "item_variations.id",
+                "items.item_name",
+                "items.id as item_id",
+                "item_types.item_type_name",
+                "supplier.name as supplier_name",
+                "supplier.contact_number",
+                "supplier.address",
+                "payment_types.type as payment_type",
+            )
+            ->join('purchase_variations as pv1', "pv1.purchase_id", '=', "purchase.id")
+            ->join("payment_types", "payment_types.id", "=", "purchase.payment_type_id")
+            ->join('item_variations', 'item_variations.id', '=', 'pv1.item_variation_id')
+            ->join("items", "items.id", "=", "item_variations.item_id")
+            ->join("item_types", "item_types.id", "=", "items.item_type_id")
+            ->join("supplier", "supplier.id", "=", "purchase.supplier_id")
+            ->get();
 
-        // DB::table('supplier_invoice')
-        // // ->where('inventory_item.id','=','supplier_invoice_item.item_id')
-        // ->join('supplier_invoice_item','supplier_invoice.id','=','supplier_invoice_item.supplier_invoice_id')
-        // ->join('inventory_items','inventory_items.id','=','supplier_invoice_item.item_id')
-        // ->select('supplier_invoice.local_invoice','supplier_invoice.invoice_date','supplier_invoice_item.supplier_invoice_id','supplier_invoice_item.id','supplier_invoice.supplier_id','inventory_items.id as itemCode','inventory_items.code as itemCodeName',
-        // 'inventory_items.id as itemId','inventory_items.name as itemName',
-        // 'supplier_invoice_item.qty as item_qty', 'supplier_invoice.remarks as common_remarks',
-        // 'supplier_invoice_item.remarks as item_remarks', 'supplier_invoice.created_at',
-        // 'supplier_invoice_item.unit_price as unitPrice',
-        // 'supplier_invoice.total_amount as totalAmount', 'supplier_invoice_item.status as status', DB::raw('select unit_type from inventory_items where inventory_items.id = supplier_invoice_item.item_id as pieace'))
-        // ->where('supplier_invoice_item.status','=', 1)
-        // ->where('supplier_invoice.id','=', $this->params->supplier_invoice_id)
-        // ->get();
+
 
         $this->responseMessage = "Supplier Invoice Details fetched Successfully!";
         $this->outputData = $inv_list;
