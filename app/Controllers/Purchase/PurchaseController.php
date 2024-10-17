@@ -81,6 +81,9 @@ class   PurchaseController
             case 'purchase':
                 $this->purchase($request, $response);
                 break;
+            case 'returnPurchaseProduct':
+                $this->returnPurchaseProduct($request, $response);
+                break;
 
             case 'getAllPaymentTypes':
                 $this->getAllPaymentTypes($request, $response);
@@ -108,6 +111,9 @@ class   PurchaseController
 
             case 'getPurchaseRequisitionInfo':
                 $this->getPurchaseRequisitionInfo($request, $response);
+                break;
+            case 'getReturnInvoiceDetails':
+                $this->getReturnInvoiceDetails($request, $response);
                 break;
 
             case 'deletePurchaseRequisition':
@@ -222,7 +228,7 @@ class   PurchaseController
 
                 $key = $item_id . "_" . $unit_type_id . "_" . $sales_price;
 
-               
+
                 if (!empty($existingVariations[$key])) {
                     $existingVariation = $existingVariations[$key];
                     $update_stock = $existingVariation->stock + $qty;
@@ -335,6 +341,188 @@ class   PurchaseController
             $this->success = false;
         }
     }
+
+
+
+    public function returnPurchaseProduct(Request $request, Response $response)
+    {
+        DB::beginTransaction();
+        try {
+            $returnItems = $this->params->return_items;
+            $purchaseReturnItems = [];
+            $manageStocks = [];
+            $purchaseIds = [];
+            $itemIds = [];
+            $total_items = 0;
+            $total_amount = 0;
+
+
+
+            // Generate Invoice Number
+            $now = date("ym");
+            $lastPurchaseInvoice = DB::table("purchase_return_history")
+                ->where("purchase_return_invoice", "LIKE", "PRINV-" . $now . "%")
+                ->orderBy("id", "DESC")
+                ->first();
+            $purchaseInvoiceNumber = !empty($lastPurchaseInvoice)
+                ? (int)(substr($lastPurchaseInvoice->purchase_return_invoice, -4)) + 1
+                : 1;
+            $purchaseReturnInvoice = "PRINV-" . $now . str_pad($purchaseInvoiceNumber, 8, "0", STR_PAD_LEFT);
+
+            $purchaseReturnId = DB::table("purchase_return_history")->insertGetId([
+                "purchase_return_invoice" => $purchaseReturnInvoice,
+                "quantity" => 0,
+                "total_price" => 0,
+            ]);
+
+            // Prepare data for bulk operations and track necessary IDs
+            foreach ($returnItems as $item) {
+                $purchase_id = $item['purchase_id'];
+                $item_id = $item['id'];
+                $qty = $item['return_qty'];
+                $unit_price = $item['item_unitPrice'];
+                $total_unit_price = $qty * $unit_price;
+
+                // Collect purchase return data
+                $purchaseReturnItems[] = [
+                    "purchase_return_id" => $purchaseReturnId,
+                    "purchase_id" => $purchase_id,
+                    // "item_variation_id" => $item_id,
+                    "quantity" => $qty,
+                    "unit_price" => $unit_price,
+                    "total_price" => $total_unit_price
+                ];
+
+                // Collect stock management data
+                $manageStocks[] = [
+                    "item_id" => $item_id,
+                    "qty" => $qty,
+                ];
+
+                // Track unique IDs to minimize DB queries
+                $purchaseIds[] = $purchase_id;
+                $itemIds[] = $item_id;
+
+                $total_items += $qty;
+                $total_amount += $total_unit_price;
+            }
+
+            DB::table("purchase_return_history")->where([
+                "purchase_return_invoice" => $purchaseReturnInvoice,
+                "id" => $purchaseReturnId,
+            ])->update([
+                "quantity" => $total_items,
+                "total_price" => $total_amount,
+            ]);
+
+
+            // Insert all purchase return items in one query
+            DB::table("purchase_return_items")->insert($purchaseReturnItems);
+
+            // Fetch all related purchase and item data in one query
+            $purchases = DB::table("purchase")
+                ->whereIn("id", $purchaseIds)
+                ->get()
+                ->keyBy("id"); // Use id as the key for quick lookup
+
+            $items = DB::table("item_variations")
+                ->whereIn("id", $itemIds)
+                ->get()
+                ->keyBy("id");
+
+            // Prepare bulk update data for purchases and stocks
+            $purchaseUpdates = [];
+            $stockUpdates = [];
+
+            foreach ($purchaseReturnItems as $row) {
+                if (isset($purchases[$row["purchase_id"]])) {
+                    $purchase = $purchases[$row["purchase_id"]];
+                    $newQty = $purchase->quantity - $row['quantity'];
+                    $newTotalPrice = $purchase->total_price - $row['total_price'];
+
+                    $purchaseUpdates[] = [
+                        "id" => $row["purchase_id"],
+                        "quantity" => $newQty,
+                        "total_price" => $newTotalPrice,
+                    ];
+                }
+            }
+
+            foreach ($manageStocks as $row) {
+                if (isset($items[$row["item_id"]])) {
+                    $item = $items[$row["item_id"]];
+                    $newQty = $item->stock - $row['qty'];
+
+                    $stockUpdates[] = [
+                        "id" => $row["item_id"],
+                        "stock" => $newQty,
+                    ];
+                }
+            }
+
+            // Bulk update purchases
+            foreach ($purchaseUpdates as $update) {
+                DB::table("purchase")->where("id", $update['id'])->update([
+                    "quantity" => $update['quantity'],
+                    "total_price" => $update['total_price'],
+                ]);
+            }
+
+            // Bulk update stocks
+            foreach ($stockUpdates as $update) {
+                DB::table("item_variations")->where("id", $update['id'])->update([
+                    "stock" => $update['stock'],
+                ]);
+            }
+
+            DB::commit();
+            $this->responseMessage = "Purchase return successfully";
+            $this->outputData = $purchaseReturnId;
+            $this->success = true;
+        } catch (\Exception $e) {
+            DB::rollback();
+            $this->responseMessage = "Purchase return failed: " . $e->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+    public function getReturnInvoiceDetails(Request $request, Response $response)
+    {
+        DB::beginTransaction();
+        try {
+            $invoice_id = $this->params->return_invoice_id;
+
+            $invoice = DB::table("purchase_return_history")
+                ->select(
+                    "purchase_return_history.purchase_return_invoice",
+                    "purchase_return_history.total_price as return_total_price",
+                    "purchase_return_history.quantity as total_return_quantity",
+                    "purchase_return_items.quantity as return_quantity",
+                    "purchase_return_items.unit_price",
+                    "purchase_return_items.total_price",
+                    "items.item_name",
+                    "item_types.item_type_name"
+                )
+                ->join("purchase_return_items", "purchase_return_items.purchase_return_id", "=", "purchase_return_history.id")
+                ->join("purchase", "purchase.id", "=", "purchase_return_items.purchase_id")
+                ->join("items", "items.id", "=", "purchase.item_id")
+                ->join("item_types", "item_types.id", "=", "items.item_type_id")
+                ->where("purchase_return_history.id", $invoice_id)
+                ->get();
+
+            DB::commit();
+            $this->responseMessage = "Purchase return successfully";
+            $this->outputData = $invoice;
+            $this->success = true;
+        } catch (\Exception $e) {
+            DB::rollback();
+            $this->responseMessage = "Purchase return failed: " . $e->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
 
     public function getAllPaymentTypes(Request $request, Response $response)
     {

@@ -1222,6 +1222,7 @@ class   InvoiceController
 
         $inv_list = DB::table("purchase")
             ->select(
+                "purchase.id as purchase_id",
                 "purchase.purchase_invoice",
                 "purchase.unit_price",
                 "purchase.quantity",
