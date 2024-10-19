@@ -115,6 +115,9 @@ class   PurchaseController
             case 'getReturnInvoiceDetails':
                 $this->getReturnInvoiceDetails($request, $response);
                 break;
+            case 'getAllPurchaseReturnInvoice':
+                $this->getAllPurchaseReturnInvoice($request, $response);
+                break;
 
             case 'deletePurchaseRequisition':
                 $this->deletePurchaseRequisition($request, $response);
@@ -178,6 +181,9 @@ class   PurchaseController
             $accountSupplier = [];
             $account_liabilities = [];
             $prev_purchase_variation = [];
+            $items = [];
+            $categories = [];
+            $item_types = [];
 
             // Initialize totals
             $total_amount = 0;
@@ -190,7 +196,6 @@ class   PurchaseController
             $sales_prices = array_column($products, 'salesPrice');
 
             // print_r($item_ids);
-
             $existingVariations = DB::table('item_variations')
                 ->whereIn('item_id', $item_ids)
                 ->whereIn('unit_type_id', $unit_type_ids)
@@ -200,7 +205,17 @@ class   PurchaseController
                     return $item->item_id . '_' . $item->unit_type_id . '_' . $item->sales_price;
                 });
 
+            $lastItemCount = DB::table('item_variations')->select("count_id")->orderBy("id", "DESC")->first();
+            $itCodeCount = $lastItemCount->count_id + 1;
 
+            $items  = DB::table("items")->whereIn("id", $item_ids)->get()->keyBy(function ($item) {
+                return $item->id;
+            });
+
+            $item_type_ids = $items->pluck("item_type_id")->all();
+            $item_types = DB::table("item_types")->whereIn("id", $item_type_ids)->get()->keyBy(function ($item) {
+                return $item->id;
+            });
 
 
             // Loop through products and prepare insert arrays
@@ -239,13 +254,19 @@ class   PurchaseController
                         'stock' => $update_stock
                     ];
                 } else {
+                    $itemCode = "IT" . str_pad($itCodeCount, 8, "0", STR_PAD_LEFT);
                     // Item variation
                     $itemVariations[] = [
+                        "item_name" =>  $items[$item_id]->item_name . " - " . $item_types[$items[$item_id]->item_type_id]->item_type_name,
+                        "category_id" => $items[$item_id]->category_id,
+                        "item_code" => $itemCode,
+                        "count_id" => $itCodeCount,
                         "item_id" => $item_id,
                         "unit_type_id" => $unit_type_id,
                         "sales_price" => $sales_price,
                         "stock" => $qty,
                     ];
+                    $itCodeCount++;
                 }
 
 
@@ -487,6 +508,28 @@ class   PurchaseController
         }
     }
 
+
+    public function getAllPurchaseReturnInvoice(Request $request, Response $response)
+    {
+        DB::beginTransaction();
+        try {
+
+            $invoice = DB::table("purchase_return_history")
+                ->orderBy("id", "DESC")
+                ->get();
+
+            DB::commit();
+            $this->responseMessage = "Purchase return successfully";
+            $this->outputData = $invoice;
+            $this->success = true;
+        } catch (\Exception $e) {
+            DB::rollback();
+            $this->responseMessage = "Purchase return failed: " . $e->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
     public function getReturnInvoiceDetails(Request $request, Response $response)
     {
         DB::beginTransaction();
@@ -498,14 +541,20 @@ class   PurchaseController
                     "purchase_return_history.purchase_return_invoice",
                     "purchase_return_history.total_price as return_total_price",
                     "purchase_return_history.quantity as total_return_quantity",
+                    "purchase_return_history.created_at",
                     "purchase_return_items.quantity as return_quantity",
                     "purchase_return_items.unit_price",
                     "purchase_return_items.total_price",
                     "items.item_name",
-                    "item_types.item_type_name"
+                    "item_types.item_type_name",
+                    "supplier.name as supplier_name",
+                    "supplier.address as supplier_address",
+                    "supplier.contact_number as supplier_contact_number",
                 )
+
                 ->join("purchase_return_items", "purchase_return_items.purchase_return_id", "=", "purchase_return_history.id")
                 ->join("purchase", "purchase.id", "=", "purchase_return_items.purchase_id")
+                ->join("supplier", "supplier.id", "=", "purchase.supplier_id")
                 ->join("items", "items.id", "=", "purchase.item_id")
                 ->join("item_types", "item_types.id", "=", "items.item_type_id")
                 ->where("purchase_return_history.id", $invoice_id)

@@ -108,6 +108,7 @@ use App\Controllers\HouseKeeping\LaundryVoucher\LaundryVoucherController;
 use App\Controllers\Inventory\UnitTypeController;
 use App\Controllers\Inventory\ItemTypeController;
 use App\Controllers\Purchase\PurchaseController;
+use App\Controllers\POS\PosController;
 use App\Controllers\RosterManagement\Assignment\RosterAssignmnetController;
 
 return function (App $app) {
@@ -194,6 +195,9 @@ return function (App $app) {
     $app->get('/app/purchase/invoice', [InvoiceController::class, 'go']);
     $app->post('/app/purchase/invoice', [InvoiceController::class, 'go']);
 
+    ######### -> Pos Controller
+    $app->get('/app/pos', [PosController::class, 'go']);
+    $app->post('/app/pos', [PosController::class, 'go']);
 
     ######### -> Purchase Controller
     $app->get('/app/purchase-product', [PurchaseController::class, 'go']);
