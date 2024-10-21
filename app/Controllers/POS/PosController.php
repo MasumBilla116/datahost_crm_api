@@ -85,6 +85,14 @@ class   PosController
                 $this->addSales($request, $response);
                 break;
 
+            case 'getAllInvoicesList':
+                $this->getAllInvoicesList($request, $response);
+                break;
+
+            case 'getInvoiceDetails':
+                $this->getInvoiceDetails($request, $response);
+                break;
+
             default:
                 $this->responseMessage = "Invalid request!";
                 return $this->customResponse->is400Response($response, $this->responseMessage);
@@ -106,13 +114,22 @@ class   PosController
         DB::beginTransaction();
         try {
             $allItems = $this->params->items;
-            $delivaryCharge = $this->params->deliveryCharge;
+            $delivaryCharge = $this->params->deliveryCharge ?? 0;
             $customer_id = $this->params->customer_id;
             $invoide_date = $this->params->inv_date;
-            $paid_amount = $this->params->payableAmount;
-            $discount = $this->params->discount;
+            $discount = $this->params->discount ?? 0;
             $creationType = $this->params->craetionType;
-            $discountAmount = $this->params->discountAmount;
+            $discountAmount = $this->params->discountAmount ?? 0;
+            $payment_status = 0;
+            $total_amount = 0;
+
+            if ($creationType === "payment") {
+                $paid_amount = $this->params->payableAmount;
+                $payment_status = 1;
+            } else {
+                $paid_amount = 0;
+            }
+
 
             $lastInvoice = DB::table('sales')->select("count_id")->orderBy("id", "DESC")->first();
             if (empty($lastInvoice)) {
@@ -132,12 +149,13 @@ class   PosController
                 "discount" => $discount,
                 "discount_amount" => $discountAmount,
                 "delivary_charge" => $delivaryCharge,
+                "created_at" => date("Y-m-d h:m:i", strtotime($invoide_date)),
+                "payment_status" => $payment_status
             ]);
 
             $total_sales_price = 0;
             $salesIems = [];
             $itemVariationUpdates = [];
-
 
             $itemIds = array_column($allItems, "id");
             $items = DB::table('item_variations')->whereIn("id", $itemIds)->get()->keyBy(function ($item) {
@@ -174,14 +192,57 @@ class   PosController
                 }
             }
 
+            $total_amount = (($total_sales_price - $discountAmount) + $delivaryCharge);
 
             DB::table('sales')->where([
                 "id" => $sales_id
             ])->update([
-                "total_sales_price" => $total_sales_price
+                "total_sales_price" => $total_sales_price,
+                "total_amount" => $total_amount,
             ]);
 
             DB::table("sales_items")->insert($salesIems);
+
+
+            // @@ fetch customer
+            $customer = DB::table("customers")->where("id", $customer_id)->first();
+
+            $newBalance = 0;
+
+            if (!empty($customer)) {
+                if (($customer->balance < 0) && ($paid_amount == 0)) {
+                    $newBalance = $customer->balance -  $total_amount;
+                } else  if (($customer->balance < 0) && ($paid_amount > 0)) {
+                    $newBalance = $customer->balance;
+                } else if (($customer->balance >= 0) && ($paid_amount == 0)) {
+                    $newBalance = $customer->balance -  $total_amount;
+                } else if (($customer->balance >= 0) && ($paid_amount > 0)) {
+                    $newBalance = $customer->balance;
+                }
+            }
+
+            DB::table("customers")->where("id", $customer->id)->update([
+                "balance" => $newBalance,
+            ]);
+
+            if ($paid_amount == 0) {
+                $debit = 0;
+                $credit = 0;
+            } else {
+                $debit =  $total_amount;
+                $credit = 0;
+            }
+
+            DB::table('account_customer')->insert([
+                "customer_id" => $customer->id,
+                "invoice_id" => $sales_id,
+                "inv_type" => "Sales",
+                "reference" => $sales_invoice,
+                "debit" => $debit,
+                "credit" => $credit,
+                "balance" => $newBalance,
+                "note" => "Product sales"
+            ]);
 
 
             foreach ($itemVariationUpdates as $key => $item) {
@@ -205,7 +266,108 @@ class   PosController
         }
     }
 
+    public function getAllInvoicesList(Request $request, Response $response)
+    {
+        try {
+            $pageNo = $_GET['page'];
+            $perPageShow = $_GET['perPageShow'];
+            $totalRow = 0;
 
+            $filter = $this->params->filterValue;
+            $status = $filter['status'];
+            $search = $filter['search'];
+
+            $salesItemQuery = DB::table('sales')
+                ->select(
+                    "sales.id",
+                    "sales.sales_invoice",
+                    "sales.total_items",
+                    "sales.total_amount",
+                    "sales.payment_status",
+                    "sales.created_at",
+                    "customers.first_name",
+                    "customers.last_name"
+
+                )
+                ->join("customers", "customers.id", "=", "sales.customer_id");
+
+            if (!empty($status)) {
+                $salesItemQuery->where("sales.payment_status", (int)$status);
+            }
+
+            if (!empty($search)) {
+                $salesItemQuery->where("sales.sales_invoice", "LIKE", "%" . $search . "%")
+                    ->orWhere("customers.first_name", "LIKE", "%" . $search . "%")
+                    ->orWhere("customers.last_name", "LIKE", "%" . $search . "%")
+                    ->orWhere("customers.mobile", "LIKE", "%" . $search . "%");
+            }
+
+
+            $salesItems = $salesItemQuery->get();
+
+            $totalRow = $salesItemQuery->count();
+
+            $this->outputData = [
+                $pageNo =>  $salesItems,
+                "total" => $totalRow
+            ];
+
+            $this->responseMessage = "Category fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Fail to load category: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+    public function getInvoiceDetails(Request $request, Response $response)
+    {
+        try {
+
+            $invoiceId = $this->params->invoice_id;
+
+            $salesItemQuery = DB::table('sales')
+                ->select(
+                    "sales.id",
+                    "sales.sales_invoice",
+                    "sales.total_items",
+                    "sales.total_amount",
+                    "sales.payment_status",
+                    "sales.created_at",
+                    "sales.discount",
+                    "sales.discount_amount",
+                    "sales.delivary_charge",
+                    "sales.extra_charge",
+                    "customers.first_name",
+                    "customers.last_name",
+                    "customers.mobile",
+                    "customers.address",
+                    "sales_items.quantity as sales_item_qty",
+                    "sales_items.sales_price",
+                    "sales_items.total_price as sales_total_price",
+                    "item_variations.item_name",
+                    "item_variations.item_code",
+                )
+                ->join("customers", "customers.id", "=", "sales.customer_id")
+                ->join("sales_items", "sales_items.sales_id", "=", "sales.id")
+                ->join('item_variations', "item_variations.id", "=", "sales_items.item_variation_id");
+
+
+            $salesItems = $salesItemQuery->where("sales.id", $invoiceId)->get();
+
+
+            $this->outputData = $salesItems;
+            $this->responseMessage = "Sales items fetch successfull";
+            $this->success = true;
+        } catch (\Exception $th) {
+            $this->responseMessage = "Sales items fetch failed: " . $th->getMessage();
+            $this->outputData = [];
+            $this->success = false;
+        }
+    }
+
+    public function getSalesReturnInvoice(Request $request, Response $response) {}
 
     public function getAllItems(Request $request, Response $response)
     {
